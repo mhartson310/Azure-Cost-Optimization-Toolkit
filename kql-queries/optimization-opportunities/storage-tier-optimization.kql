@@ -1,0 +1,122 @@
+// ============================================
+// QUERY METADATA
+// ============================================
+// Name: Storage Tier Optimization Analysis
+// Purpose: Identify blobs that should move to cooler tiers
+// Data Sources: AzureMetrics, StorageBlobLogs
+// Frequency: Monthly
+// Estimated Savings: 30-70% on infrequently accessed data
+// Author: Mario Hartson
+// Website: https://mhartson.com
+// ============================================
+
+// DESCRIPTION:
+// Analyzes blob storage access patterns to recommend tier transitions.
+//
+// Azure Storage Tiers:
+// - Hot: $0.0184/GB/month (immediate access, high transaction cost)
+// - Cool: $0.0100/GB/month (46% savings, 30-day minimum)
+// - Archive: $0.00099/GB/month (95% savings, 180-day minimum)
+
+// ACCESS PATTERN RULES:
+// - Accessed in last 30 days: Keep in Hot
+// - Not accessed 30-90 days: Move to Cool
+// - Not accessed 90+ days: Move to Archive
+
+// THE QUERY:
+StorageBlobLogs
+| where TimeGenerated > ago(90d)
+| where OperationName in ("GetBlob", "GetBlobProperties", "ReadFile")
+| extend 
+    StorageAccount = tostring(split(tostring(split(AccountName, "."), 0), "/")[-1]),
+    Container = tostring(split(Uri, "/")[3]),
+    BlobName = tostring(split(Uri, "/")[4]),
+    BlobSize_GB = todouble(ResponseBodySize) / 1073741824  // Bytes to GB
+| summarize 
+    LastAccessed = max(TimeGenerated),
+    AccessCount = count(),
+    TotalDataAccessed_GB = sum(BlobSize_GB),
+    UniqueBlobs = dcount(BlobName)
+    by StorageAccount, Container, BlobName
+| extend 
+    DaysSinceLastAccess = datetime_diff('day', now(), LastAccessed),
+    CurrentTier = "Hot",  // Default assumption
+    RecommendedTier = case(
+        DaysSinceLastAccess > 90, "Archive",
+        DaysSinceLastAccess > 30, "Cool",
+        "Hot"
+    ),
+    // Estimated monthly savings per GB
+    MonthlySavingsPerGB = case(
+        DaysSinceLastAccess > 90, 0.01741,  // Hot → Archive: $0.0174/GB savings
+        DaysSinceLastAccess > 30, 0.00840,  // Hot → Cool: $0.0084/GB savings
+        0.0
+    )
+| where RecommendedTier != "Hot"
+| project 
+    StorageAccount,
+    Container,
+    BlobName,
+    CurrentTier,
+    RecommendedTier,
+    DaysSinceLastAccess,
+    LastAccessed,
+    AccessCount,
+    TotalDataAccessed_GB = round(TotalDataAccessed_GB, 3),
+    MonthlySavingsPerGB,
+    EstimatedMonthlySavings = round(TotalDataAccessed_GB * MonthlySavingsPerGB, 2)
+| order by EstimatedMonthlySavings desc
+
+// SUMMARY BY STORAGE ACCOUNT:
+// StorageBlobLogs
+// | where TimeGenerated > ago(90d)
+// | summarize 
+//     TotalBlobs = dcount(Uri),
+//     LastAccess = max(TimeGenerated),
+//     TotalSize_GB = sum(todouble(ResponseBodySize)) / 1073741824
+//     by AccountName
+// | extend 
+//     DaysSinceLastAccess = datetime_diff('day', now(), LastAccess),
+//     RecommendedAction = case(
+//         DaysSinceLastAccess > 90, "Move to Archive",
+//         DaysSinceLastAccess > 30, "Move to Cool",
+//         "Keep in Hot"
+//     )
+
+// IMPLEMENTATION:
+// 1. Review results and verify access patterns
+// 2. Create Azure Storage Lifecycle Management policy:
+//
+// Azure Portal → Storage Account → Lifecycle Management
+// Rule: "Move to Cool after 30 days, Archive after 90 days"
+//
+// Or use Azure Policy / Terraform for automation
+
+// LIFECYCLE POLICY JSON:
+// {
+//   "rules": [
+//     {
+//       "enabled": true,
+//       "name": "MoveToCooler",
+//       "type": "Lifecycle",
+//       "definition": {
+//         "actions": {
+//           "baseBlob": {
+//             "tierToCool": { "daysAfterModificationGreaterThan": 30 },
+//             "tierToArchive": { "daysAfterModificationGreaterThan": 90 },
+//             "delete": { "daysAfterModificationGreaterThan": 2555 }
+//           }
+//         },
+//         "filters": {
+//           "blobTypes": [ "blockBlob" ]
+//         }
+//       }
+//     }
+//   ]
+// }
+
+// CAUTION:
+// - Cool tier: 30-day minimum (charged if deleted earlier)
+// - Archive tier: 180-day minimum + rehydration time/cost
+// - Test with non-critical data first
+// - Monitor access patterns after tier changes
