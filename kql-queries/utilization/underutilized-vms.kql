@@ -1,0 +1,135 @@
+// ============================================
+// QUERY METADATA
+// ============================================
+// Name: Underutilized Virtual Machines
+// Purpose: Identify VMs running at low CPU/memory for right-sizing
+// Data Sources: Perf (Log Analytics), InsightsMetrics
+// Frequency: Weekly
+// Estimated Savings: 15-40% on identified VMs
+// Author: Mario Hartson
+// Website: https://mhartson.com
+// ============================================
+
+// DESCRIPTION:
+// Identifies VMs with consistently low CPU and memory utilization
+// that are candidates for right-sizing (downsizing to smaller SKU).
+//
+// Typical findings:
+// - 30-50% of enterprise VMs are oversized
+// - Average potential savings: 30-40% on those VMs
+// - Low-risk optimization (easily reversible)
+
+// UTILIZATION THRESHOLDS:
+// - CPU < 20%: Significantly oversized
+// - CPU < 40%: Moderately oversized
+// - CPU > 80%: At risk of performance issues
+
+// PREREQUISITES:
+// - VMs must have Log Analytics agent installed
+// - At least 30 days of performance data
+// - Perf counter: "% Processor Time"
+
+// THE QUERY:
+// Analyze VM utilization over last 30 days
+let AnalysisPeriod = 30d;
+let LowCPUThreshold = 20.0;
+let LowMemoryThreshold = 30.0;
+
+// CPU Analysis
+let CPUData = 
+    Perf
+    | where TimeGenerated > ago(AnalysisPeriod)
+    | where ObjectName == "Processor" and CounterName == "% Processor Time"
+    | where InstanceName == "_Total"
+    | summarize 
+        AvgCPU = avg(CounterValue),
+        MaxCPU = max(CounterValue),
+        P95CPU = percentile(CounterValue, 95),
+        P50CPU = percentile(CounterValue, 50),
+        SampleCount = count()
+        by Computer;
+
+// Memory Analysis
+let MemoryData = 
+    Perf
+    | where TimeGenerated > ago(AnalysisPeriod)
+    | where ObjectName == "Memory" and CounterName == "% Committed Bytes In Use"
+    | summarize 
+        AvgMemory = avg(CounterValue),
+        MaxMemory = max(CounterValue),
+        P95Memory = percentile(CounterValue, 95),
+        P50Memory = percentile(CounterValue, 50)
+        by Computer;
+
+// Heartbeat (to verify VM is actually running)
+let VMStatus = 
+    Heartbeat
+    | where TimeGenerated > ago(AnalysisPeriod)
+    | summarize 
+        LastSeen = max(TimeGenerated),
+        VMSize = any(ComputerEnvironment),
+        Location = any(RemoteIPCountry),
+        OSType = any(OSType),
+        HeartbeatCount = count()
+        by Computer;
+
+// Join all data
+CPUData
+| join kind=inner (MemoryData) on Computer
+| join kind=inner (VMStatus) on Computer
+| extend 
+    UtilizationStatus = case(
+        AvgCPU < LowCPUThreshold and AvgMemory < LowMemoryThreshold, "Significantly Underutilized",
+        AvgCPU < LowCPUThreshold or AvgMemory < LowMemoryThreshold, "Moderately Underutilized",
+        AvgCPU > 80 or AvgMemory > 80, "High Utilization",
+        "Normal Utilization"
+    ),
+    // Recommendation based on utilization
+    Recommendation = case(
+        AvgCPU < 10 and AvgMemory < 20, "Consider deallocating or significantly downsizing",
+        AvgCPU < LowCPUThreshold and AvgMemory < LowMemoryThreshold, "Downsize 1-2 sizes smaller",
+        AvgCPU < 40 and AvgMemory < 50, "Consider downsizing 1 size smaller",
+        AvgCPU > 80 or AvgMemory > 80, "Consider upsizing or optimizing workload",
+        "No action needed"
+    ),
+    // Estimated savings (rough calculation)
+    EstimatedMonthlySavings_USD = case(
+        AvgCPU < 10 and AvgMemory < 20, 500.0,   // Large savings
+        AvgCPU < LowCPUThreshold and AvgMemory < LowMemoryThreshold, 300.0,  // Medium savings
+        AvgCPU < 40, 150.0,  // Small savings
+        0.0
+    )
+| project 
+    Computer,
+    UtilizationStatus,
+    AvgCPU = round(AvgCPU, 1),
+    P95CPU = round(P95CPU, 1),
+    MaxCPU = round(MaxCPU, 1),
+    AvgMemory = round(AvgMemory, 1),
+    P95Memory = round(P95Memory, 1),
+    MaxMemory = round(MaxMemory, 1),
+    OSType,
+    LastSeen,
+    Recommendation,
+    EstimatedMonthlySavings_USD
+| where UtilizationStatus != "Normal Utilization"
+| order by EstimatedMonthlySavings_USD desc, AvgCPU asc
+
+// ACTIONS TO TAKE:
+// 1. Review top 20 underutilized VMs
+// 2. Verify business justification for each
+// 3. Test downsizing in non-production first
+// 4. Schedule maintenance window for production changes
+// 5. Monitor for 2 weeks after resize to ensure no issues
+// 6. Document savings achieved
+
+// ADVANCED: Weekly Trend Analysis
+// Perf
+// | where TimeGenerated > ago(90d)
+// | where ObjectName == "Processor" and CounterName == "% Processor Time"
+// | where InstanceName == "_Total"
+// | summarize 
+//     AvgCPU = avg(CounterValue)
+//     by Computer, bin(TimeGenerated, 7d)
+// | extend Week = format_datetime(TimeGenerated, 'yyyy-MM-dd')
+// | evaluate pivot(Week, any(AvgCPU))
