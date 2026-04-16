@@ -1,0 +1,51 @@
+# PowerShell
+*.ps1.bak
+
+# Output files (reports shouldn't be committed)
+reports/
+output/
+*.csv
+*.xlsx
+!sample-*.csv
+!sample-*.xlsx
+
+# Temporary files
+*.tmp
+*.bak
+*.old
+*.log
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Azure/Terraform
+*.tfstate
+*.tfstate.*
+.terraform/
+.terraform.lock.hcl
+*.tfvars
+!example.tfvars
+!*.example.tfvars
+
+# Credentials (NEVER commit these)
+*.pem
+*.key
+credentials.json
+*.publishsettings
+.env
+.env.local
+
+# Personal notes
+notes.md
+TODO.md
+scratch/
+
+# Power BI working files
+*.pbix.bak
