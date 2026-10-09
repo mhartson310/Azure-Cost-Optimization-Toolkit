@@ -89,7 +89,7 @@ pwsh ./scripts/cost-assessment.ps1 -SubscriptionId "YOUR_SUB_ID" -OutputPath "./
 ### 3. Identify Quick Wins
 
 ```powershell
-# Find orphaned resources (typically 5-15% of spend)
+# Find orphaned resources and quantify current waste
 pwsh ./scripts/orphaned-resources/find-orphaned-disks.ps1
 
 # Find oversized VMs
@@ -122,264 +122,81 @@ pwsh ./scripts/reporting/monthly-savings-report.ps1 -Month "2026-04"
 
 ---
 
-## 💡 Top 10 Cost Saving Opportunities
+## Optimization opportunities
 
-### 1. Right-Size Virtual Machines
+The toolkit focuses on optimization categories that can be measured and validated before changes are made.
 
-VM sizing should be validated against utilization, availability, performance, and workload requirements before changes are made. Right-size based on actual usage.
+### 1. Right-size compute
 
-```powershell
-# Analyze VM utilization over 30 days
+Use utilization and workload requirements to identify oversized compute. Review CPU, memory, availability, performance, licensing, and scaling behavior before changing SKUs.
+
+~~~powershell
 ./scripts/right-sizing/analyze-vm-utilization.ps1 -DaysToAnalyze 30
+~~~
 
-# Output: VMs with <50% CPU/memory utilization
-# Typical savings: 30-40% on those VMs
-```
+### 2. Remove orphaned and unused resources
 
-**Real example:** Client had 200 VMs averaging 15% CPU. Right-sized to smaller SKUs, saved $45k/month.
+Find unattached disks, unused public IPs, stale snapshots, empty resource groups, and resources with no clear owner.
 
----
-
-### 2. Delete Orphaned Resources (5-15% savings)
-
-Unattached disks, unused public IPs, abandoned snapshots accumulate over time.
-
-```powershell
-# Find all orphaned resources
+~~~powershell
 ./scripts/orphaned-resources/find-all-orphaned.ps1
+~~~
 
-# Common findings:
-# - Unattached managed disks (typically 50+ per sub)
-# - Unused public IPs ($3.60/month each)
-# - Abandoned snapshots (growing monthly)
-# - Empty resource groups
-```
+### 3. Evaluate reservations and savings plans
 
-**Real example:** Fortune 500 client had 847 unattached disks = $12k/month waste.
+For stable workloads, compare commitment options against actual usage, growth expectations, and workload lifecycle.
 
----
-
-### 3. Use Reserved Instances / Savings Plans (40-72% savings)
-
-For predictable workloads, Reserved Instances save 40-72%.
-
-```powershell
-# Analyze RI opportunities
+~~~powershell
 ./scripts/reserved-instances/analyze-ri-opportunities.ps1
+~~~
 
-# Recommendations:
-# - Which VM sizes to reserve
-# - 1-year vs 3-year term analysis
-# - Shared vs single-scope
-# - Break-even calculations
-```
+### 4. Schedule non-production workloads
 
-**Real example:** Client saved $2.1M annually by converting 60% of VMs to 3-year RIs.
+Use shutdown/startup automation where business and operational requirements allow it.
 
----
+~~~powershell
+./scripts/automation/configure-auto-shutdown.ps1
+~~~
 
-### 4. Auto-Shutdown Non-Production VMs (60-75% savings on non-prod)
+### 5. Optimize storage lifecycle
 
-Non-prod VMs don't need to run 24/7.
+Analyze access patterns before moving data between hot, cool, cold, or archive tiers. Include retrieval cost, minimum-retention requirements, and recovery expectations.
 
-```powershell
-# Configure auto-shutdown for dev/test
-./scripts/automation/configure-auto-shutdown.ps1 `
-    -Environment "NonProd" `
-    -ShutdownTime "19:00" `
-    -StartupTime "07:00" `
-    -TimeZone "Eastern Standard Time"
-```
-
-**Typical savings:** 65% reduction on non-prod costs (12 hours/day × 5 days/week)
-
-**Real example:** $180k/month non-prod spend → $63k/month after auto-shutdown.
-
----
-
-### 5. Storage Tier Optimization (30-70% savings on storage)
-
-Move infrequently accessed data to cool/archive tiers.
-
-```powershell
-# Analyze blob access patterns
+~~~powershell
 ./scripts/storage-optimization/analyze-blob-access.ps1
-
-# Deploy lifecycle management
 ./scripts/storage-optimization/deploy-lifecycle-policies.ps1
-```
+~~~
 
-**Storage tier pricing:**
-- Hot: $0.0184/GB (immediate access)
-- Cool: $0.0100/GB (46% savings, 30-day minimum)
-- Archive: $0.00099/GB (95% savings, 180-day minimum)
+### 6. Review database utilization
 
-**Real example:** Client moved 400TB of backups to archive tier, saved $7,200/month.
+Look for idle capacity, consolidation candidates, elastic-pool opportunities, and workload-specific scaling options.
 
----
+### 7. Review network cost drivers
 
-### 6. Delete Unused Resources (5-10% savings)
+Inspect unused gateways/public IPs, unnecessary cross-region traffic, architecture-related egress, and avoidable data-transfer patterns.
 
-Zombie resources that are running but not needed.
+### 8. Evaluate licensing benefits
 
-```powershell
-# Find unused resources (no usage in 30+ days)
-./scripts/unused-resources/find-unused-resources.ps1 -DaysInactive 30
+Where applicable, compare Azure Hybrid Benefit and other licensing options against the organization's actual entitlement and workload profile.
 
-# Common unused resources:
-# - VMs with no recent logins
-# - Databases with no connections
-# - App Services with no requests
-# - Load Balancers with no backend
-```
+### 9. Enforce cost governance
 
----
+Use tags, policy, budget ownership, and approved SKU/region patterns so optimization is not undone by future deployments.
 
-### 7. Optimize SQL Databases (20-40% savings on SQL)
+### 10. Measure realized outcomes
 
-Right-size SQL databases and use elastic pools.
+Track recommendations separately from implemented changes and realized savings. A recommendation is not a saving until the change is deployed and the billing data confirms the effect.
 
-```powershell
-# Analyze SQL database utilization
-./scripts/right-sizing/analyze-sql-utilization.ps1
+## Validation scenarios
 
-# Elastic pool opportunity analysis
-./scripts/right-sizing/analyze-elastic-pool-savings.ps1
-```
+Rather than relying on fixed savings percentages, validate the toolkit against your own environment:
 
-**Real example:** Client had 50 SQL databases, consolidated to 3 elastic pools, saved $28k/month.
-
----
-
-### 8. Network Cost Optimization (10-25% savings on networking)
-
-Eliminate unnecessary network charges.
-
-```powershell
-# Find network cost leaks
-./scripts/network-optimization/find-network-waste.ps1
-
-# Common issues:
-# - Unused VPN gateways ($150/month each)
-# - Over-provisioned ExpressRoute circuits
-# - Cross-region data transfer costs
-# - Unused Application Gateways
-```
-
----
-
-### 9. Azure Hybrid Benefit (40-55% savings on Windows/SQL)
-
-Use existing Windows Server and SQL Server licenses.
-
-```powershell
-# Identify eligible resources
-./scripts/licensing/azure-hybrid-benefit-analyzer.ps1
-
-# Apply licenses programmatically
-./scripts/licensing/apply-hybrid-benefit.ps1
-```
-
-**Real example:** Client saved $340k annually by applying Hybrid Benefit to 800 Windows VMs.
-
----
-
-### 10. Enforce Tagging for Chargeback (Visibility = Savings)
-
-Can't optimize what you can't see.
-
-```powershell
-# Deploy tagging policy
-terraform apply -target="azurerm_policy_assignment.require_tags"
-
-# Audit tag compliance
-./scripts/governance/audit-tag-compliance.ps1
-```
-
-**Result:** Clear visibility into which departments/projects spend money → Accountability → Savings
-
----
-
-## 📊 Cost Analysis Dashboards
-
-### Executive Dashboard
-
-Shows:
-- Monthly spend trends (12 months)
-- Top 10 cost drivers
-- Savings opportunities identified
-- Savings realized YTD
-- Projected annual savings
-
-### Operational Dashboard
-
-Shows:
-- Resource utilization heatmap
-- Orphaned resources count
-- Right-sizing opportunities
-- Reserved Instance utilization
-- Storage tier distribution
-
-### Department Chargeback
-
-Shows:
-- Cost by department/cost center
-- Cost per user/resource
-- Trend analysis
-- Budget vs actual
-- Cost allocation reports
-
----
-
-## 💼 Case Studies
-
-### Case Study 1: Financial Services Firm
-
-**Profile:** 500 VMs, $180k/month Azure spend  
-**Duration:** 3 months  
-**Savings:** 42% = $76k/month = **$912k/year**
-
-**Optimizations:**
-- Right-sized 180 oversized VMs: $28k/month
-- Deleted 94 orphaned disks: $4.2k/month
-- Implemented RIs for 60% of workload: $32k/month
-- Auto-shutdown for 150 dev VMs: $8k/month
-- Storage tier optimization: $3.8k/month
-
----
-
-### Case Study 2: Healthcare Organization
-
-**Profile:** 2,000 VMs, $450k/month Azure spend  
-**Duration:** 6 months  
-**Savings:** 38% = $171k/month = **$2.05M/year**
-
-**Optimizations:**
-- Azure Hybrid Benefit: $62k/month
-- 3-year RIs for production: $48k/month
-- SQL elastic pool consolidation: $22k/month
-- Network rationalization: $18k/month
-- Orphaned resource cleanup: $11k/month
-- Right-sizing: $10k/month
-
----
-
-### Case Study 3: Government Contractor (FedRAMP)
-
-**Profile:** FedRAMP High environment, $280k/month  
-**Duration:** 4 months  
-**Savings:** 31% = $87k/month = **$1.04M/year**
-
-**Note:** FedRAMP environments have less optimization flexibility
-
-**Optimizations:**
-- Reserved Instances: $35k/month
-- Azure Hybrid Benefit: $18k/month
-- Right-sizing (within compliance): $12k/month
-- Storage optimization: $15k/month
-- Network optimization: $7k/month
-
----
+- What resources are idle or orphaned?
+- Which workloads are consistently over-provisioned?
+- Which commitments match stable usage?
+- Which non-production resources can be scheduled safely?
+- Which storage data has a lifecycle pattern that supports tiering?
+- Which optimization opportunities conflict with security, resilience, compliance, or performance requirements?
 
 ## 🎓 Implementation Guide
 
@@ -491,23 +308,18 @@ Shows:
 
 ---
 
-## 📈 Expected Results
+## Measuring results
 
-### Conservative Estimate (First Year)
+Use a before/after measurement model:
 
-- **Month 1-2:** 5-10% savings (quick wins)
-- **Month 3-4:** 15-25% savings (right-sizing, RIs)
-- **Month 5-6:** 25-35% savings (full optimization)
-- **Month 7-12:** 30-40% savings (sustained)
+1. establish a billing and usage baseline;
+2. record the recommendation and expected operational impact;
+3. approve and implement the change;
+4. compare actual cost and performance after the change;
+5. record realized savings separately from forecast savings;
+6. keep rollback criteria for changes that affect performance or resilience.
 
-### Aggressive Estimate (With Full Commitment)
-
-- **Month 1-2:** 10-15% savings
-- **Month 3-4:** 25-35% savings
-- **Month 5-6:** 35-45% savings
-- **Month 7-12:** 40-50% savings
-
----
+The value of the toolkit is the repeatable **decision and validation process**, not a universal savings percentage.
 
 ## ⚠️ Important Considerations
 
@@ -565,29 +377,19 @@ MIT License - see [LICENSE](LICENSE) file.
 
 ---
 
-## 🎯 Why Choose This Toolkit
+## Where this toolkit fits
 
-### vs Azure Advisor (Built-in)
+Azure Advisor and third-party FinOps platforms can be valuable inputs. This repository is different: it provides transparent scripts, KQL, policy examples, and implementation patterns that teams can review, adapt, version, and run inside their own engineering workflow.
 
-| Feature | Azure Advisor | This Toolkit |
-|---------|--------------|-------------|
-| Coverage | Generic recommendations | Production-tested optimizations |
-| Depth | Surface-level | Deep analysis |
-| Customization | Limited | Fully customizable |
-| Automation | Manual actions | Automated implementations |
-| Case Studies | None | Real savings examples |
+Use it when you want to:
 
-### vs Third-Party Tools (CloudHealth, Cloudability)
+- inspect the logic behind a recommendation;
+- integrate cost controls with infrastructure-as-code and policy;
+- keep optimization decisions reviewable in source control;
+- connect FinOps decisions with security, governance, and platform architecture;
+- build organization-specific automation instead of relying only on portal recommendations.
 
-| Feature | Third-Party Tools | This Toolkit |
-|---------|------------------|-------------|
-| Cost | $50k-$500k/year | Free |
-| Customization | Limited | Unlimited |
-| Data Residency | External | Your subscription |
-| FedRAMP Compatible | Varies | Yes |
-| Vendor Lock-in | High | None |
-
----
+It is not a replacement for Azure Cost Management, Azure Advisor, billing data, or commercial FinOps platforms.
 
 ## 🔗 Related Projects
 
@@ -597,6 +399,6 @@ MIT License - see [LICENSE](LICENSE) file.
 
 ---
 
-**Built with 💰 by [Mario Hartson](https://mhartson.com)** | Cloud Security & Cost Optimization | 15+ years saving organizations millions
+**Mario Worwell** | Cloud Security Architect | Azure | FinOps | Governance
 
 📧 mario@hartsonadvisory.com | 💼 [LinkedIn](https://linkedin.com/in/mariohartson) | 🌐 [mhartson.com](https://mhartson.com)
