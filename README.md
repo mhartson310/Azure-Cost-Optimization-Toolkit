@@ -2,35 +2,24 @@
 
 [![License](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
 [![Azure](https://img.shields.io/badge/Azure-Cost_Optimization-0078D4?logo=microsoft-azure)](https://azure.microsoft.com/)
-[![Savings](https://img.shields.io/badge/Average_Savings-30--50%25-success)]()
 [![Maintained](https://img.shields.io/badge/Maintained-Yes-brightgreen.svg)](https://github.com/mhartson310/Azure-Cost-Optimization-Toolkit)
 
-Production-tested scripts, KQL queries, and Azure Policy definitions to reduce Azure costs by **30-50%** without impacting operations.
-
-**Based on real cost optimization engagements** saving clients $50k-$2M annually.
+A practical Azure FinOps and cost-governance toolkit with scripts, KQL queries, policy patterns, and reporting examples for identifying waste, improving resource efficiency, and making optimization repeatable.
 
 ---
 
-## 💰 What This Delivers
+## What this demonstrates
 
-**Real savings from real deployments:**
+- Azure cost-governance and FinOps architecture;
+- identifying orphaned, idle, and oversized resources;
+- policy-based cost guardrails;
+- KQL and scripting for repeatable analysis;
+- tagging, chargeback, and optimization workflows;
+- balancing cost decisions with operational and security requirements.
 
-| Client Size | Monthly Azure Spend | Savings Achieved | Annual Savings |
-|-------------|--------------------|--------------------|----------------|
-| **Small Enterprise** | $50k/month | 35% reduction | **$210k/year** |
-| **Mid-Market** | $200k/month | 42% reduction | **$1.0M/year** |
-| **Enterprise** | $500k/month | 38% reduction | **$2.3M/year** |
-| **Fortune 500** | $2M/month | 31% reduction | **$7.4M/year** |
+## What this is
 
-**Average ROI:** 200-500% in first year after implementation
-
----
-
-## 🎯 What This Is
-
-**Real optimization code** used to reduce Azure costs across Fortune 500 and government environments.
-
-Not theoretical "best practices" - these are the exact scripts and policies that have saved millions of dollars in production.
+A reference implementation for turning Azure cost optimization into an engineering workflow rather than a one-time spreadsheet exercise. The focus is on repeatable discovery, governance, validation, and reporting.
 
 ---
 
@@ -92,11 +81,10 @@ pwsh ./scripts/cost-assessment.ps1 -SubscriptionId "YOUR_SUB_ID" -OutputPath "./
 ```
 
 **This generates:**
-- Current spend analysis (by service, region, resource group)
-- Top cost drivers (biggest expenses)
-- Immediate savings opportunities (quick wins)
-- Long-term optimization recommendations
-- ROI projections
+- current spend analysis by service, region, or resource group;
+- top cost drivers;
+- candidate optimization opportunities;
+- follow-up recommendations for review and validation.
 
 ### 3. Identify Quick Wins
 
@@ -136,9 +124,9 @@ pwsh ./scripts/reporting/monthly-savings-report.ps1 -Month "2026-04"
 
 ## 💡 Top 10 Cost Saving Opportunities
 
-### 1. Right-Size Virtual Machines (15-30% savings)
+### 1. Right-Size Virtual Machines
 
-Most VMs are oversized by 2-3 sizes. Right-size based on actual usage.
+VM sizing should be validated against utilization, availability, performance, and workload requirements before changes are made. Right-size based on actual usage.
 
 ```powershell
 # Analyze VM utilization over 30 days
