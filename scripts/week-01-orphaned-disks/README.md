@@ -34,4 +34,4 @@ If the platform and finance teams decide to remove an unused disk, use the organ
 
 ## Proof and limitations
 
-CI syntax validation demonstrates only that the PowerShell source parses. **It does not prove that Azure inventory ran successfully or that reported candidates are safe to delete.** Capture sanitized evidence from a subscription-level lab before claiming runtime validation.
+CI validates PowerShell syntax **and executes deterministic offline classification tests** for attached/multi-attached disks, missing or invalid dates, minimum-age boundaries, and safe review defaults ([test cases](../../tests/disk-candidates.tests.ps1)). **These tests do not prove that Azure inventory ran successfully or that reported candidates are safe to delete.** Capture sanitized evidence from a subscription-level lab before claiming runtime validation.
