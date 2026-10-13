@@ -32,6 +32,8 @@ param(
     [string]$OutputPath = "./reports"
 )
 
+. (Join-Path $PSScriptRoot "DiskCandidates.ps1")
+
 Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
 
@@ -50,42 +52,11 @@ if ([string]::IsNullOrWhiteSpace($subscription)) {
 Write-Host "Inspecting managed disks in subscription $subscription (read-only)..." -ForegroundColor Cyan
 
 $now = [DateTimeOffset]::UtcNow
-$cutoff = $now.AddDays(-$MinimumAgeDays)
 $disks = @(Get-AzDisk -ErrorAction Stop)
 
 $results = @(
     foreach ($disk in $disks) {
-        $state = [string]$disk.DiskState
-        $managedBy = [string]$disk.ManagedBy
-        $extended = @($disk.ManagedByExtended | Where-Object { $_ })
-        $created = $disk.TimeCreated
-
-        # No age data means the eligibility is unknown: do not recommend it.
-        if ($null -eq $created) { continue }
-        $createdUtc = ([DateTimeOffset]$created).ToUniversalTime()
-
-        if ($state -ne "Unattached" -or
-            -not [string]::IsNullOrWhiteSpace($managedBy) -or
-            $extended.Count -gt 0 -or
-            $createdUtc -gt $cutoff) {
-            continue
-        }
-
-        [pscustomobject]@{
-            SubscriptionId    = $subscription
-            ResourceGroup     = $disk.ResourceGroupName
-            DiskName          = $disk.Name
-            ResourceId        = $disk.Id
-            Location          = $disk.Location
-            DiskSizeGB        = $disk.DiskSizeGB
-            Sku               = [string]$disk.Sku.Name
-            DiskState         = $state
-            CreatedUtc        = $createdUtc.ToString("o")
-            AgeDays           = [int][Math]::Floor(($now - $createdUtc).TotalDays)
-            ManagedBy         = $managedBy
-            OwnerReviewStatus = "PENDING"
-            DeletionApproved  = $false
-        }
+        Get-ManagedDiskReviewCandidate -Disk $disk -SubscriptionId $subscription -ObservedUtc $now -MinimumAgeDays $MinimumAgeDays
     }
 )
 
