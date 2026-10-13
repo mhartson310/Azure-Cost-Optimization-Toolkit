@@ -4,6 +4,12 @@ Azure cost-analysis and waste-detection examples intended to make cloud optimiza
 
 > **Scope:** Analysis patterns and scripts. No fixed savings percentage or independently verified client savings are claimed.
 
+## Automated checks
+
+[![PowerShell syntax](https://github.com/mhartson310/Azure-Cost-Optimization-Toolkit/actions/workflows/powershell-validation.yml/badge.svg)](https://github.com/mhartson310/Azure-Cost-Optimization-Toolkit/actions/workflows/powershell-validation.yml)
+
+PowerShell syntax is checked without accessing Azure. **This does not verify runtime inventory accuracy or approve disk deletion.**
+
 ## What this demonstrates
 
 - Azure resource waste and cost-analysis workflows
