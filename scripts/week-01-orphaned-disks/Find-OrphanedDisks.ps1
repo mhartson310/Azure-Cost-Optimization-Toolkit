@@ -1,172 +1,117 @@
-## 📊 What You Get
+#Requires -Modules Az.Accounts, Az.Compute
+<#
+.SYNOPSIS
+    Finds Azure managed-disk candidates for manual orphaned-resource review.
+.DESCRIPTION
+    READ-ONLY. Enumerates managed disks in the selected subscription and reports
+    unattached disks older than the chosen minimum age. An unattached disk is NOT
+    automatically safe to delete; validate owners, backups, recovery plans,
+    dependencies and potential reservations before taking action.
+.EXAMPLE
+    ./Find-OrphanedDisks.ps1 -MinimumAgeDays 30 -ExportFormat Both
+.EXAMPLE
+    ./Find-OrphanedDisks.ps1 -SubscriptionId "<subscription-guid>" -ExportFormat CSV
+.NOTES
+    No resources are modified. Requires an existing Connect-AzAccount session
+    and read permission on the subscription.
+#>
+[CmdletBinding()]
+param(
+    [Parameter()]
+    [string]$SubscriptionId,
 
-### Beautiful HTML Report
+    [Parameter()]
+    [ValidateRange(0, 3650)]
+    [int]$MinimumAgeDays = 30,
 
-![HTML Report Preview](../../docs/images/orphaned-disks-report-preview.png)
+    [Parameter()]
+    [ValidateSet("Both", "CSV", "JSON", "None")]
+    [string]$ExportFormat = "Both",
 
-The HTML report includes:
-- Executive summary with savings metrics
-- Priority-coded disk list (Critical/High/Medium/Low)
-- Cost analysis per disk
-- Recommended actions
-- Age and creation date
-- Resource tags (if any)
+    [Parameter()]
+    [string]$OutputPath = "./reports"
+)
 
-### CSV Export
+Set-StrictMode -Version Latest
+$ErrorActionPreference = "Stop"
 
-For spreadsheet analysis and tracking:
-- All disk details
-- Resource IDs for automation
-- Cost calculations
-- Age in days
-- Sortable by cost/priority
-
-## 🎯 How It Works
-
-1. **Connects** to your Azure subscription(s)
-2. **Scans** all managed disks across all resource groups
-3. **Identifies** disks with:
-   - `DiskState = "Unattached"` 
-   - No `ManagedBy` reference
-   - Age greater than minimum threshold (default 30 days)
-4. **Calculates** monthly and annual cost per disk
-5. **Prioritizes** by cost impact
-6. **Generates** beautiful HTML and CSV reports
-
-## ⚙️ Parameters
-
-| Parameter | Default | Description |
-|-----------|---------|-------------|
-| `SubscriptionId` | All accessible | Specific subscription to scan |
-| `OutputPath` | `.\reports` | Where to save reports |
-| `MinimumAge` | `30` | Minimum days orphaned to report |
-| `ExportFormat` | `Both` | CSV, HTML, or Both |
-| `DryRun` | `False` | Preview without generating files |
-
-## 🗑️ How to Delete Orphaned Disks
-
-**Option 1: Manual (Safest - Recommended)**
-
-```powershell
-# Review the disk first
-Get-AzDisk -ResourceGroupName "rg-name" -DiskName "disk-name"
-
-# Create snapshot (safety measure)
-$disk = Get-AzDisk -ResourceGroupName "rg-name" -DiskName "disk-name"
-$snapshotConfig = New-AzSnapshotConfig -SourceUri $disk.Id -Location $disk.Location -CreateOption Copy
-New-AzSnapshot -ResourceGroupName "rg-name" -SnapshotName "disk-name-snapshot" -Snapshot $snapshotConfig
-
-# Delete the disk
-Remove-AzDisk -ResourceGroupName "rg-name" -DiskName "disk-name" -Force
-```
-
-**Option 2: Bulk Delete (Use with caution)**
-
-```powershell
-# Import the CSV
-$orphanedDisks = Import-Csv ".\reports\orphaned-disks-2026-04-16-1430.csv"
-
-# Filter for high-confidence deletions (>90 days old)
-$toDelete = $orphanedDisks | Where-Object { $_.AgeInDays -gt 90 }
-
-# Review before deleting
-$toDelete | Format-Table DiskName, AgeInDays, MonthlyCostUSD
-
-# Delete (after confirmation)
-foreach ($disk in $toDelete) {
-    Write-Host "Deleting $($disk.DiskName)..." -ForegroundColor Yellow
-    Remove-AzDisk -ResourceGroupName $disk.ResourceGroup -DiskName $disk.DiskName -Force
+$context = Get-AzContext
+if (-not $context) {
+    throw "No Azure context found. Run Connect-AzAccount first."
 }
-```
+if (-not [string]::IsNullOrWhiteSpace($SubscriptionId)) {
+    $context = Set-AzContext -SubscriptionId $SubscriptionId -ErrorAction Stop
+}
+$subscription = $context.Subscription.Id
+if ([string]::IsNullOrWhiteSpace($subscription)) {
+    throw "No subscription selected. Choose a subscription explicitly."
+}
 
-## 🛡️ Safety Tips
+Write-Host "Inspecting managed disks in subscription $subscription (read-only)..." -ForegroundColor Cyan
 
-**Before deleting disks:**
+$now = [DateTimeOffset]::UtcNow
+$cutoff = $now.AddDays(-$MinimumAgeDays)
+$disks = @(Get-AzDisk -ErrorAction Stop)
 
-1. ✅ **Verify with resource owner** - Check if disk is planned for reuse
-2. ✅ **Create snapshots** - Easy to restore if needed
-3. ✅ **Check for dependencies** - Some disks might be part of inactive workloads
-4. ✅ **Document deletion** - Track what was deleted and when
-5. ✅ **Monitor applications** - Ensure no unexpected impacts
+$results = @(
+    foreach ($disk in $disks) {
+        $state = [string]$disk.DiskState
+        $managedBy = [string]$disk.ManagedBy
+        $extended = @($disk.ManagedByExtended | Where-Object { $_ })
+        $created = $disk.TimeCreated
 
-**Never delete without checking:**
+        # No age data means the eligibility is unknown: do not recommend it.
+        if ($null -eq $created) { continue }
+        $createdUtc = ([DateTimeOffset]$created).ToUniversalTime()
 
-- 🚫 Disks with business-critical tags
-- 🚫 Recently detached disks (< 30 days)
-- 🚫 Disks in production resource groups without verification
-- 🚫 Disks associated with disaster recovery scenarios
+        if ($state -ne "Unattached" -or
+            -not [string]::IsNullOrWhiteSpace($managedBy) -or
+            $extended.Count -gt 0 -or
+            $createdUtc -gt $cutoff) {
+            continue
+        }
 
-## 🔄 Automation
+        [pscustomobject]@{
+            SubscriptionId    = $subscription
+            ResourceGroup     = $disk.ResourceGroupName
+            DiskName          = $disk.Name
+            ResourceId        = $disk.Id
+            Location          = $disk.Location
+            DiskSizeGB        = $disk.DiskSizeGB
+            Sku               = [string]$disk.Sku.Name
+            DiskState         = $state
+            CreatedUtc        = $createdUtc.ToString("o")
+            AgeDays           = [int][Math]::Floor(($now - $createdUtc).TotalDays)
+            ManagedBy         = $managedBy
+            OwnerReviewStatus = "PENDING"
+            DeletionApproved  = $false
+        }
+    }
+)
 
-### Schedule Monthly Scans
+$results = @($results | Sort-Object -Property AgeDays -Descending)
+Write-Host ("Found {0} candidate(s) for human review out of {1} disk(s)." -f $results.Count, $disks.Count) -ForegroundColor Yellow
 
-**Option 1: Task Scheduler (Windows)**
+if ($ExportFormat -ne "None") {
+    New-Item -Path $OutputPath -ItemType Directory -Force | Out-Null
+    $timestamp = (Get-Date).ToUniversalTime().ToString("yyyyMMddTHHmmssZ")
+    $stem = Join-Path $OutputPath "orphaned-disks-$timestamp"
 
-```powershell
-# Create scheduled task for monthly scans
-$action = New-ScheduledTaskAction -Execute "pwsh.exe" -Argument "-File C:\Scripts\Find-OrphanedDisks.ps1"
-$trigger = New-ScheduledTaskTrigger -Monthly -At 6am -DaysOfMonth 1
-Register-ScheduledTask -TaskName "MonthlyOrphanedDiskScan" -Action $action -Trigger $trigger
-```
+    if ($ExportFormat -in @("Both", "CSV")) {
+        # An empty CSV is not falsely represented as a successful finding.
+        if ($results.Count -gt 0) {
+            $results | Export-Csv -Path "$stem.csv" -NoTypeInformation -Encoding UTF8
+            Write-Host "CSV: $stem.csv"
+        } else {
+            Write-Host "No CSV created: no matching candidates."
+        }
+    }
+    if ($ExportFormat -in @("Both", "JSON")) {
+        ConvertTo-Json -InputObject $results -Depth 5 |
+            Set-Content -Path "$stem.json" -Encoding UTF8
+        Write-Host "JSON: $stem.json"
+    }
+}
 
-**Option 2: Azure Automation Runbook**
-
-Upload the script to Azure Automation for scheduled cloud execution.
-
-**Option 3: GitHub Actions**
-
-```yaml
-# .github/workflows/monthly-scan.yml
-on:
-  schedule:
-    - cron: '0 6 1 * *'  # First day of month at 6 AM
-```
-
-## 📈 Tracking Savings
-
-Create a simple tracking spreadsheet:
-
-| Month | Disks Deleted | Monthly Savings | Running Total |
-|-------|---------------|-----------------|---------------|
-| Apr 2026 | 15 | $847 | $847 |
-| May 2026 | 8 | $423 | $1,270 |
-| Jun 2026 | 12 | $678 | $1,948 |
-
-## 🐛 Troubleshooting
-
-### Error: "Cannot access subscription"
-
-```powershell
-# Verify permissions
-Get-AzRoleAssignment -SignInName (Get-AzContext).Account.Id
-```
-
-### Error: "Az module not installed"
-
-```powershell
-Install-Module -Name Az -Scope CurrentUser -Force
-Import-Module Az
-```
-
-### HTML report doesn't display correctly
-
-- Open in modern browser (Chrome, Edge, Firefox)
-- Ensure HTML file downloaded completely
-- Check for antivirus blocking content
-
-## 🔗 Related Scripts
-
-- **[Week 2](../week-02-unused-public-ips/)** - Unused Public IPs Detector
-- **[Week 3](../week-03-vm-right-sizing/)** - VM Right-Sizing Analyzer
-
-## 📞 Support
-
-Questions? Issues? Suggestions?
-
-- 📧 Email: mario@hartsonadvisory.com
-- 💬 [GitHub Issues](https://github.com/mhartson310/Azure-Cost-Optimization-Toolkit/issues)
-- 🌐 [mhartson.com](https://mhartson.com)
-
----
-
-**Built by [Mario Hartson](https://mhartson.com)** | Part of the [Azure Cost Optimization Toolkit](https://github.com/mhartson310/Azure-Cost-Optimization-Toolkit)
+# Output structured objects for interactive review and downstream read-only analysis.
+$results
